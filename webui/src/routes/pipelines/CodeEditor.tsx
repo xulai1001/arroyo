@@ -1,6 +1,12 @@
-import Editor from '@monaco-editor/react';
+import { loader, Editor } from '@monaco-editor/react';
 import React, { Dispatch } from 'react';
 import { Flex } from '@chakra-ui/react';
+
+loader.config({
+    paths: {
+        vs: '/monaco-editor/min/vs'
+    }
+});
 
 export function CodeEditor({
   code,

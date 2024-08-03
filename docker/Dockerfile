@@ -8,7 +8,7 @@ ARG PROFILE=release
 
 RUN apt-get update && \
     apt-get -y install curl pkg-config unzip build-essential libssl-dev openssl \
-    cmake clang wget postgresql postgresql-client supervisor python3 python-is-python3 sudo bash libsasl2-dev && \
+    cmake clang wget postgresql postgresql-client supervisor python3 python-is-python3 sudo bash libsasl2-dev tree && \
     cargo install refinery_cli
 
 # Install node & pnpm
@@ -33,7 +33,11 @@ COPY webui webui
 
 # set git hash
 ENV VERGEN_GIT_SHA=$GIT_SHA
-RUN bash -c "cd webui && source ~/.bashrc && /root/.local/share/pnpm/pnpm install && /root/.local/share/pnpm/pnpm build"
+RUN bash -c "cd webui && source ~/.bashrc && /root/.local/share/pnpm/pnpm install && /root/.local/share/pnpm/pnpm install monaco-editor && /root/.local/share/pnpm/pnpm build"
+# add monaco-editor to public/
+# test
+# RUN bash -c "tree webui/"
+RUN bash -c "cd webui && mkdir -p dist/public/monaco-editor && cp -R node_modules/monaco-editor/ dist/public/ && tree dist/"
 
 COPY docker/refinery.toml refinery.toml
 
@@ -45,7 +49,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,id=${TARGETPLATFORM}-${P
     refinery migrate -c refinery.toml -p crates/arroyo-api/migrations && \
     CARGO_NET_GIT_FETCH_WITH_CLI=true CARGO_PROFILE_RELEASE_DEBUG=false cargo build --profile ${PROFILE} --bin arroyo && \
     mv target/*/arroyo /arroyo
-
 
 FROM debian:bookworm-slim as arroyo
 WORKDIR /app
@@ -66,8 +69,9 @@ CMD ["cluster"]
 
 FROM rust:slim-bookworm AS arroyo-full
 WORKDIR /app
+# add custom deps
 RUN apt-get update && \
-    apt-get -y install libsasl2-2 ca-certificates curl pkg-config
+    apt-get -y install libsasl2-2 ca-certificates curl pkg-config librdkafka-dev libsasl2-dev libssl-dev default-libmysqlclient-dev
 
 ENV ARROYO__API__RUN_HTTP_PORT=5115
 

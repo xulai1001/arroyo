@@ -16,6 +16,13 @@ import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import { ConnectionSchema, post } from '../../lib/data_fetching';
 import { formatError } from '../../lib/util';
 
+import { loader } from '@monaco-editor/react';
+loader.config({
+  paths: {
+    vs: '/monaco-editor/min/vs'
+  }
+});
+
 export function SchemaEditor({
   state,
   setState,
