@@ -82,6 +82,9 @@ impl ArrowSerializer {
             Format::Parquet(_) => todo!("parquet"),
             Format::RawString(RawStringFormat {}) => self.serialize_raw_string(&batch),
             Format::RawBytes(RawBytesFormat {}) => self.serialize_raw_bytes(&batch),
+            Format::Protobuf(_) => {
+                todo!("protobuf serializer!")
+            }
         }
     }
 
@@ -129,14 +132,12 @@ impl ArrowSerializer {
 
                 serde_json::to_writer(&mut buf, &record).unwrap();
                 buf
+            } else if let Some(header) = header {
+                let mut buf = header.to_vec();
+                buf.extend(&row);
+                buf
             } else {
-                if let Some(header) = header {
-                    let mut buf = header.to_vec();
-                    buf.extend(&row);
-                    buf
-                } else {
-                    row
-                }
+                row
             }
         }))
     }

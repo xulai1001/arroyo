@@ -253,6 +253,8 @@ export interface components {
     }, {
       avro: components["schemas"]["AvroFormat"];
     }, {
+      protobuf: components["schemas"]["ProtobufFormat"];
+    }, {
       parquet: components["schemas"]["ParquetFormat"];
     }, {
       raw_string: components["schemas"]["RawStringFormat"];
@@ -272,6 +274,7 @@ export interface components {
       description?: string | null;
       dylibUrl: string;
       id: string;
+      language: components["schemas"]["UdfLanguage"];
       name: string;
       prefix: string;
       /** Format: int64 */
@@ -436,6 +439,13 @@ export interface components {
     };
     /** @enum {string} */
     PrimitiveType: "Int32" | "Int64" | "UInt32" | "UInt64" | "F32" | "F64" | "Bool" | "String" | "Bytes" | "UnixMillis" | "UnixMicros" | "UnixNanos" | "DateTime" | "Json";
+    ProtobufFormat: {
+      /** Format: binary */
+      compiledSchema?: string | null;
+      confluentSchemaRegistry?: boolean;
+      intoUnstructuredJson?: boolean;
+      messageName?: string | null;
+    };
     QueryValidationResult: {
       errors: (string)[];
       graph?: components["schemas"]["PipelineGraph"] | null;
@@ -445,7 +455,12 @@ export interface components {
     SchemaDefinition: OneOf<[{
       json_schema: string;
     }, {
-      protobuf_schema: string;
+      protobuf_schema: {
+        dependencies?: {
+          [key: string]: string | undefined;
+        };
+        schema: string;
+      };
     }, {
       avro_schema: string;
     }, {
@@ -487,10 +502,14 @@ export interface components {
     TimestampFormat: "rfc3339" | "unix_millis";
     Udf: {
       definition: string;
+      language?: components["schemas"]["UdfLanguage"];
     };
+    /** @enum {string} */
+    UdfLanguage: "python" | "rust";
     UdfPost: {
       definition: string;
       description?: string | null;
+      language?: components["schemas"]["UdfLanguage"];
       prefix: string;
     };
     UdfValidationResult: {
@@ -503,6 +522,7 @@ export interface components {
     };
     ValidateUdfPost: {
       definition: string;
+      language?: components["schemas"]["UdfLanguage"];
     };
   };
   responses: never;

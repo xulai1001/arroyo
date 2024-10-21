@@ -5,7 +5,8 @@ use crate::{CheckpointCounter, ControlOutcome, SourceFinishType};
 use anyhow::anyhow;
 use arrow::array::RecordBatch;
 use arrow::datatypes::DataType;
-use arroyo_datastream::logical::DylibUdfConfig;
+use arrow::datatypes::Schema;
+use arroyo_datastream::logical::{DylibUdfConfig, PythonUdfConfig};
 use arroyo_metrics::TaskCounters;
 use arroyo_rpc::grpc::rpc::{TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::{ControlMessage, ControlResp};
@@ -13,6 +14,7 @@ use arroyo_storage::StorageProvider;
 use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
 use arroyo_udf_host::parse::inner_type;
 use arroyo_udf_host::{ContainerOrLocal, LocalUdf, SyncUdfDylib, UdfDylib, UdfInterface};
+use arroyo_udf_python::PythonUDF;
 use async_trait::async_trait;
 use datafusion::common::{DataFusionError, Result as DFResult};
 use datafusion::execution::FunctionRegistry;
@@ -21,10 +23,13 @@ use datafusion::logical_expr::planner::ExprPlanner;
 use datafusion::logical_expr::{
     create_udaf, AggregateUDF, ScalarUDF, Signature, TypeSignature, Volatility, WindowUDF,
 };
+use datafusion::physical_plan::{displayable, ExecutionPlan};
 use dlopen2::wrapper::Container;
 use futures::future::OptionFuture;
 use std::any::Any;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
@@ -64,6 +69,16 @@ impl OperatorNode {
         match self {
             OperatorNode::Source(s) => s.name(),
             OperatorNode::Operator(s) => s.name(),
+        }
+    }
+
+    pub fn display(&self) -> DisplayableOperator {
+        match self {
+            OperatorNode::Source(_) => DisplayableOperator {
+                name: self.name().into(),
+                fields: vec![],
+            },
+            OperatorNode::Operator(op) => op.display(),
         }
     }
 
@@ -313,6 +328,73 @@ async fn operator_run_behavior(
     final_message
 }
 
+pub enum AsDisplayable<'a> {
+    Str(&'a str),
+    String(String),
+    Display(&'a dyn Display),
+    Debug(&'a dyn Debug),
+    Plan(&'a dyn ExecutionPlan),
+    Schema(&'a Schema),
+}
+
+impl<'a> From<&'a str> for AsDisplayable<'a> {
+    fn from(s: &'a str) -> Self {
+        AsDisplayable::Str(s)
+    }
+}
+
+impl From<String> for AsDisplayable<'_> {
+    fn from(s: String) -> Self {
+        AsDisplayable::String(s)
+    }
+}
+
+impl<'a> From<&'a dyn ExecutionPlan> for AsDisplayable<'a> {
+    fn from(p: &'a dyn ExecutionPlan) -> Self {
+        AsDisplayable::Plan(p)
+    }
+}
+
+impl<'a> From<&'a Schema> for AsDisplayable<'a> {
+    fn from(s: &'a Schema) -> Self {
+        AsDisplayable::Schema(s)
+    }
+}
+
+impl Display for AsDisplayable<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AsDisplayable::Str(s) => {
+                write!(f, "{}", s)
+            }
+            AsDisplayable::String(s) => {
+                write!(f, "{}", s)
+            }
+            AsDisplayable::Display(d) => {
+                write!(f, "{}", d)
+            }
+            AsDisplayable::Debug(d) => {
+                write!(f, "{:?}", d)
+            }
+            AsDisplayable::Plan(p) => {
+                write!(f, "`{}`", displayable(*p).one_line())
+            }
+            AsDisplayable::Schema(s) => {
+                for field in s.fields() {
+                    write!(f, "\n  * {}: {:?}, ", field.name(), field.data_type())?;
+                }
+
+                Ok(())
+            }
+        }
+    }
+}
+
+pub struct DisplayableOperator<'a> {
+    pub name: Cow<'a, str>,
+    pub fields: Vec<(&'static str, AsDisplayable<'a>)>,
+}
+
 #[async_trait::async_trait]
 pub trait ArrowOperator: Send + 'static {
     async fn handle_watermark_int(&mut self, watermark: Watermark, ctx: &mut ArrowContext) {
@@ -458,6 +540,13 @@ pub trait ArrowOperator: Send + 'static {
 
     fn tick_interval(&self) -> Option<Duration> {
         None
+    }
+
+    fn display(&self) -> DisplayableOperator {
+        DisplayableOperator {
+            name: self.name().into(),
+            fields: vec![],
+        }
     }
 
     #[allow(unused_variables)]
@@ -669,6 +758,14 @@ impl Registry {
         }
     }
 
+    pub async fn add_python_udf(&mut self, udf: &PythonUdfConfig) -> anyhow::Result<()> {
+        let udf = PythonUDF::parse(&*udf.definition).await?;
+
+        self.udfs.insert((*udf.name).clone(), Arc::new(udf.into()));
+
+        Ok(())
+    }
+
     pub fn get_dylib(&self, path: &str) -> Option<Arc<UdfDylib>> {
         self.dylibs.lock().unwrap().get(path).cloned()
     }
@@ -712,6 +809,11 @@ impl FunctionRegistry for Registry {
         &mut self,
         _: Arc<dyn FunctionRewrite + Send + Sync>,
     ) -> DFResult<()> {
+        // no-op
+        Ok(())
+    }
+
+    fn register_expr_planner(&mut self, _expr_planner: Arc<dyn ExprPlanner>) -> DFResult<()> {
         // no-op
         Ok(())
     }

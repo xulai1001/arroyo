@@ -1,10 +1,11 @@
 use anyhow::Result;
+use std::borrow::Cow;
 
 use arroyo_rpc::grpc::rpc::{GlobalKeyedTableConfig, TableConfig, TableEnum};
 use arroyo_rpc::{CheckpointEvent, ControlMessage, ControlResp};
 use arroyo_types::*;
 use std::collections::HashMap;
-
+use std::fmt::{Display, Formatter};
 use tracing::{error, warn};
 
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord, Producer};
@@ -17,7 +18,7 @@ use arrow::array::{Array, AsArray, RecordBatch};
 use arrow::datatypes::{DataType, TimeUnit};
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::ArrowOperator;
+use arroyo_operator::operator::{ArrowOperator, AsDisplayable, DisplayableOperator};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_types::CheckpointBarrier;
 use async_trait::async_trait;
@@ -48,6 +49,15 @@ pub enum ConsistencyMode {
         next_transaction_index: usize,
         producer_to_complete: Option<FutureProducer>,
     },
+}
+
+impl Display for ConsistencyMode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConsistencyMode::AtLeastOnce => write!(f, "AtLeastOnce"),
+            ConsistencyMode::ExactlyOnce { .. } => write!(f, "ExactlyOnce"),
+        }
+    }
 }
 
 impl From<SinkCommitMode> for ConsistencyMode {
@@ -183,7 +193,7 @@ impl KafkaSinkFunc {
                 rec = rec.timestamp(ts);
             }
             if let Some(k) = k.as_ref() {
-                rec = rec.key(&k);
+                rec = rec.key(k);
             }
 
             rec.payload(&v)
@@ -217,6 +227,26 @@ impl KafkaSinkFunc {
 impl ArrowOperator for KafkaSinkFunc {
     fn name(&self) -> String {
         format!("kafka-producer-{}", self.topic)
+    }
+
+    fn display(&self) -> DisplayableOperator {
+        DisplayableOperator {
+            name: Cow::Borrowed("KafkaSinkFunc"),
+            fields: vec![
+                ("topic", self.topic.as_str().into()),
+                ("bootstrap_servers", self.bootstrap_servers.as_str().into()),
+                (
+                    "consistency_mode",
+                    AsDisplayable::Display(&self.consistency_mode),
+                ),
+                (
+                    "timestamp_field",
+                    AsDisplayable::Debug(&self.timestamp_field),
+                ),
+                ("key_field", AsDisplayable::Debug(&self.key_field)),
+                ("client_config", AsDisplayable::Debug(&self.client_config)),
+            ],
+        }
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {
@@ -260,15 +290,13 @@ impl ArrowOperator for KafkaSinkFunc {
 
         for (i, v) in values.enumerate() {
             // kafka timestamp as unix millis
-            let timestamp = if let Some(ts) = timestamps {
-                Some(if ts.is_null(i) {
+            let timestamp = timestamps.map(|ts| {
+                if ts.is_null(i) {
                     0
                 } else {
                     ts.value(i) / 1_000_000
-                })
-            } else {
-                None
-            };
+                }
+            });
             // TODO: this copy should be unnecessary but likely needs a custom trait impl
             let key = keys.map(|k| k.value(i).as_bytes().to_vec());
             self.publish(timestamp, key, v, ctx).await;

@@ -1,6 +1,6 @@
 [package]
 name = "arroyo-api"
-version = "0.12.0-dev"
+version = "0.13.0-dev"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
@@ -18,11 +18,13 @@ arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-state = { path = "../arroyo-state" }
 arroyo-formats = { path = "../arroyo-formats" }
 arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
+arroyo-udf-python = { path = "../arroyo-udf/arroyo-udf-python" }
 
 tonic = { workspace = true }
 tonic-reflection = { workspace = true }
 tonic-web = { workspace = true }
-prost = "0.12"
+prost = {workspace = true}
+prost-reflect = "0.12.0"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1.12"
 tower = "0.4"

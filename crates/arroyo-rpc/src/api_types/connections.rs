@@ -3,7 +3,7 @@ use crate::primitive_to_sql;
 use anyhow::bail;
 use arrow_schema::{DataType, Field, Fields, TimeUnit};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
@@ -228,7 +228,11 @@ impl TryFrom<Field> for SourceField {
 #[serde(rename_all = "snake_case")]
 pub enum SchemaDefinition {
     JsonSchema(String),
-    ProtobufSchema(String),
+    ProtobufSchema {
+        schema: String,
+        #[serde(default)]
+        dependencies: HashMap<String, String>,
+    },
     AvroSchema(String),
     RawSchema(String),
 }
@@ -277,6 +281,16 @@ impl ConnectionSchema {
                     || self.fields.first().unwrap().field_name != "value"
                 {
                     bail!("raw_string format requires a schema with a single field called `value` of type TEXT");
+                }
+            }
+            Some(Format::Json(json_format)) => {
+                if json_format.unstructured
+                    && (self.fields.len() != 1
+                        || self.fields.first().unwrap().field_type.r#type
+                            != FieldType::Primitive(PrimitiveType::Json)
+                        || self.fields.first().unwrap().field_name != "value")
+                {
+                    bail!("json format with unstructured flag enabled requires a schema with a single field called `value` of type JSON");
                 }
             }
             _ => {

@@ -1,15 +1,11 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-    time::Duration,
-};
-
 use anyhow::Result;
 use arrow::compute::concat_batches;
 use arrow_array::RecordBatch;
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode, Registry};
+use arroyo_operator::operator::{
+    ArrowOperator, AsDisplayable, DisplayableOperator, OperatorConstructor, OperatorNode, Registry,
+};
 use arroyo_rpc::{
     df::ArroyoSchema,
     grpc::{api, rpc::TableConfig},
@@ -21,6 +17,13 @@ use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::StreamExt;
 use prost::Message;
+use std::borrow::Cow;
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+    time::Duration,
+};
+use tracing::warn;
 
 pub struct JoinWithExpiration {
     left_expiration: Duration,
@@ -139,6 +142,26 @@ impl ArrowOperator for JoinWithExpiration {
         "JoinWithExpiration".to_string()
     }
 
+    fn display(&self) -> DisplayableOperator {
+        DisplayableOperator {
+            name: Cow::Borrowed("JoinWithExpiration"),
+            fields: vec![
+                (
+                    "left_expiration",
+                    AsDisplayable::Debug(&self.left_expiration),
+                ),
+                (
+                    "right_expiration",
+                    AsDisplayable::Debug(&self.right_expiration),
+                ),
+                (
+                    "join_execution_plan",
+                    self.join_execution_plan.as_ref().into(),
+                ),
+            ],
+        }
+    }
+
     async fn process_batch(&mut self, _record_batch: RecordBatch, _ctx: &mut ArrowContext) {
         unreachable!();
     }
@@ -217,9 +240,20 @@ impl OperatorConstructor for JoinWithExpirationConstructor {
         let left_schema = left_input_schema.schema_without_keys()?;
         let right_schema = right_input_schema.schema_without_keys()?;
 
+        let mut ttl = Duration::from_micros(
+            config
+                .ttl_micros
+                .expect("ttl must be set for non-instant join"),
+        );
+
+        if ttl == Duration::ZERO {
+            warn!("TTL was not set for join with expiration");
+            ttl = Duration::from_secs(24 * 60 * 60);
+        }
+
         Ok(OperatorNode::from_operator(Box::new(JoinWithExpiration {
-            left_expiration: Duration::from_secs(3600),
-            right_expiration: Duration::from_secs(3600),
+            left_expiration: ttl,
+            right_expiration: ttl,
             left_input_schema,
             right_input_schema,
             left_schema,

@@ -11,6 +11,9 @@ RUN apt-get update && \
     cmake clang wget postgresql postgresql-client supervisor python3 python-is-python3 sudo bash libsasl2-dev tree && \
     cargo install refinery_cli
 
+# Install Python (manually, as no bookworm package for 3.12)
+
+
 # Install node & pnpm
 RUN mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
@@ -47,7 +50,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,id=${TARGETPLATFORM}-${P
     sudo -u postgres psql -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;" && \
     sudo -u postgres createdb arroyo && \
     refinery migrate -c refinery.toml -p crates/arroyo-api/migrations && \
-    CARGO_NET_GIT_FETCH_WITH_CLI=true CARGO_PROFILE_RELEASE_DEBUG=false cargo build --profile ${PROFILE} --bin arroyo && \
+    CARGO_NET_GIT_FETCH_WITH_CLI=true CARGO_PROFILE_RELEASE_DEBUG=false cargo build --features python --profile ${PROFILE} --bin arroyo && \
     mv target/*/arroyo /arroyo
 
 FROM debian:bookworm-slim as arroyo
@@ -58,6 +61,16 @@ RUN apt-get update && \
     mkdir /config
 
 COPY --from=builder /arroyo ./
+COPY --from=builder /usr/local/bin/protoc /usr/local/bin/protoc
+COPY --from=builder /app/include/google /usr/local/include/google
+COPY --from=builder /app/python /python
+
+RUN cp -r /python/bin/* /usr/local/bin/ && \
+    cp -r /python/include/* /usr/local/include/ && \
+    cp -r /python/lib/* /usr/local/lib/ && \
+    cp -r /python/share/* /usr/local/share/ && \
+    rm -rf /python && \
+    ldconfig
 
 ENV INSTALL_RUSTC=true \
     INSTALL_CLANG=true \
@@ -76,6 +89,17 @@ RUN apt-get update && \
 ENV ARROYO__API__RUN_HTTP_PORT=5115
 
 COPY --from=builder /arroyo ./
+COPY --from=builder /usr/local/bin/protoc /usr/local/bin/protoc
+COPY --from=builder /app/include/google /usr/local/include/google
+COPY --from=builder /app/python /python
+
+RUN cp -r /python/bin/* /usr/local/bin/ && \
+    cp -r /python/include/* /usr/local/include/ && \
+    cp -r /python/lib/* /usr/local/lib/ && \
+    cp -r /python/share/* /usr/local/share/ && \
+    rm -rf /python && \
+    ldconfig
+  
 
 EXPOSE 5115
 ENTRYPOINT [ "/app/arroyo" ]
